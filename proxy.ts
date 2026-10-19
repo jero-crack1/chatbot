@@ -1,6 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { guestRegex, isDevelopmentEnvironment } from "./lib/constants";
+import { updateSession } from "./utils/supabase/middleware";
+
+function redirectWithRefreshedCookies(url: URL, response: NextResponse) {
+  const redirect = NextResponse.redirect(url);
+  for (const cookie of response.cookies.getAll()) {
+    redirect.cookies.set(cookie);
+  }
+  return redirect;
+}
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -13,6 +22,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const supabaseResponse = await updateSession(request);
+
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,
@@ -24,18 +35,19 @@ export async function proxy(request: NextRequest) {
   if (!token) {
     const redirectUrl = encodeURIComponent(new URL(request.url).pathname);
 
-    return NextResponse.redirect(
-      new URL(`${base}/api/auth/guest?redirectUrl=${redirectUrl}`, request.url)
+    return redirectWithRefreshedCookies(
+      new URL(`${base}/api/auth/guest?redirectUrl=${redirectUrl}`, request.url),
+      supabaseResponse
     );
   }
 
   const isGuest = guestRegex.test(token?.email ?? "");
 
   if (token && !isGuest && ["/login", "/register"].includes(pathname)) {
-    return NextResponse.redirect(new URL(`${base}/`, request.url));
+    return redirectWithRefreshedCookies(new URL(`${base}/`, request.url), supabaseResponse);
   }
 
-  return NextResponse.next();
+  return supabaseResponse;
 }
 
 export const config = {

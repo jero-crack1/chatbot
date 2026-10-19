@@ -18,14 +18,15 @@ import {
   chatModels,
   DEFAULT_CHAT_MODEL,
   getCapabilities,
-  getModelAvailability,
 } from "@/lib/ai/models";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { getLanguageModel } from "@/lib/ai/providers";
+import { bookMeeting } from "@/lib/ai/tools/book-meeting";
 import { createDocument } from "@/lib/ai/tools/create-document";
 import { editDocument } from "@/lib/ai/tools/edit-document";
 import { getWeather } from "@/lib/ai/tools/get-weather";
 import { requestSuggestions } from "@/lib/ai/tools/request-suggestions";
+import { guardarLeadEnBaseDeDatos, saveLead } from "@/lib/ai/tools/save-lead";
 import { updateDocument } from "@/lib/ai/tools/update-document";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
@@ -48,8 +49,6 @@ import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
 export const maxDuration = 60;
-
-const HEALTH_CHECK_DELAY_MS = 9000;
 
 function isModelStreamActivity(chunk: { type: string }) {
   return !["start", "start-step", "finish-step", "finish", "raw"].includes(
@@ -198,7 +197,7 @@ export async function POST(request: Request) {
     const modelCapabilities = await getCapabilities();
     const capabilities = modelCapabilities[chatModel];
     const isReasoningModel = capabilities?.reasoning === true;
-    const supportsTools = capabilities?.tools === true;
+    const supportsTools = capabilities?.tools ?? true;
 
     const modelMessages = await convertToModelMessages(uiMessages);
 
@@ -206,13 +205,6 @@ export async function POST(request: Request) {
       execute: async ({ writer: dataStream }) => {
         const modelName = modelConfig?.name ?? chatModel;
         let hasModelActivity = false;
-        let healthCheckTimer: ReturnType<typeof setTimeout> | undefined;
-
-        const clearHealthCheckTimer = () => {
-          if (healthCheckTimer) {
-            clearTimeout(healthCheckTimer);
-          }
-        };
 
         const writeWaitingStatus = (
           phase: WaitingStatusData["phase"],
@@ -235,35 +227,16 @@ export async function POST(request: Request) {
 
         writeWaitingStatus("waiting", "Waiting...");
 
-        healthCheckTimer = setTimeout(() => {
-          getModelAvailability(chatModel)
-            .then((availability) => {
-              if (availability === "impacted") {
-                writeWaitingStatus(
-                  "health",
-                  `${modelName} may be slow or unavailable right now...`
-                );
-              } else {
-                writeWaitingStatus("still-waiting", "Still waiting...");
-              }
-            })
-            .catch(() => {
-              writeWaitingStatus("still-waiting", "Still waiting...");
-            });
-        }, HEALTH_CHECK_DELAY_MS);
-
         const markModelActive = () => {
           if (hasModelActivity) {
             return;
           }
           hasModelActivity = true;
-          clearHealthCheckTimer();
           writeWaitingStatus("thinking", "Thinking...");
         };
 
         const stopWaitingStatus = () => {
           hasModelActivity = true;
-          clearHealthCheckTimer();
         };
 
         const result = streamText({
@@ -271,6 +244,11 @@ export async function POST(request: Request) {
             isReasoningModel && !supportsTools
               ? []
               : [
+                  "book_meeting",
+                  "bookMeeting",
+                  "save_lead",
+                  "saveLead",
+                  "guardar_lead_en_base_de_datos",
                   "getWeather",
                   "createDocument",
                   "editDocument",
@@ -278,6 +256,8 @@ export async function POST(request: Request) {
                   "requestSuggestions",
                 ],
           instructions: systemPrompt({ requestHints, supportsTools }),
+          maxRetries: 0,
+          maxOutputTokens: 768,
           messages: modelMessages,
           model: getLanguageModel(chatModel),
           onAbort() {
@@ -295,12 +275,7 @@ export async function POST(request: Request) {
             stopWaitingStatus();
           },
           providerOptions: {
-            ...(modelConfig?.gatewayOrder && {
-              gateway: { order: modelConfig.gatewayOrder },
-            }),
-            ...(modelConfig?.reasoningEffort && {
-              openai: { reasoningEffort: modelConfig.reasoningEffort },
-            }),
+            google: { thinkingConfig: { thinkingLevel: "low" } },
           },
           stopWhen: isStepCount(5),
           telemetry: {
@@ -308,6 +283,11 @@ export async function POST(request: Request) {
             isEnabled: isProductionEnvironment,
           },
           tools: {
+            book_meeting: bookMeeting,
+            bookMeeting,
+            save_lead: saveLead,
+            saveLead,
+            guardar_lead_en_base_de_datos: guardarLeadEnBaseDeDatos,
             createDocument: createDocument({
               dataStream,
               modelId: chatModel,
@@ -389,6 +369,15 @@ export async function POST(request: Request) {
         }
       },
       onError: (error) => {
+        const statusCode =
+          typeof error === "object" && error !== null && "statusCode" in error
+            ? error.statusCode
+            : undefined;
+
+        if (statusCode === 429) {
+          return "Gemini alcanzó el límite de uso del proyecto (429). Revisa la cuota en Google AI Studio e inténtalo más tarde.";
+        }
+
         if (
           error instanceof Error &&
           error.message?.includes(

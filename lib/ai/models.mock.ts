@@ -1,9 +1,16 @@
 import type { LanguageModel } from "ai";
 
 const mockResponses: Record<string, string> = {
-  default: "This is a mock response for testing.",
-  greeting: "Hello! How can I help you today?",
-  weather: "The weather in San Francisco is sunny and 72°F.",
+  default:
+    "Comprendo perfectamente la necesidad de tu empresa. En LeadFlow ayudamos a negocios B2B a calificar y cerrar prospectos de alto valor. ¿Te gustaría que agendemos una llamada estratégica de 15 minutos o prefieres dejarme tus datos?",
+  greeting:
+    "¡Hola! Soy LeadFlow Agent, tu ejecutivo de ventas digital B2B. ¿Cuál es el principal desafío de captación o conversión que busca resolver tu empresa hoy?",
+  meeting:
+    "Excelente, tu empresa califica para una sesión estratégica personalizada. He procedido a coordinar los detalles para nuestra llamada.",
+  lead:
+    "Perfecto, he registrado los datos de tu empresa en nuestro CRM. Nuestro equipo comercial se comunicará contigo a la brevedad con la información requerida.",
+  weather:
+    "El clima en la ubicación solicitada es favorable para cerrar buenos negocios.",
 };
 
 const mockUsage = {
@@ -11,18 +18,74 @@ const mockUsage = {
   outputTokens: { reasoning: 0, text: 20, total: 20 },
 };
 
-function getResponseForPrompt(prompt: unknown): string {
-  const promptStr = JSON.stringify(prompt).toLowerCase();
-
-  if (promptStr.includes("weather") || promptStr.includes("temperature")) {
-    return mockResponses.weather;
+function getLastUserMessage(prompt: unknown): string {
+  if (Array.isArray(prompt)) {
+    for (let i = prompt.length - 1; i >= 0; i--) {
+      const msg = prompt[i];
+      if (msg && (msg.role === "user" || msg.type === "user")) {
+        if (typeof msg.content === "string") return msg.content;
+        if (Array.isArray(msg.content)) {
+          return msg.content
+            .map((c: any) => (typeof c === "string" ? c : c.text ?? ""))
+            .join(" ");
+        }
+      }
+    }
   }
+  if (prompt && typeof prompt === "object") {
+    const p = prompt as Record<string, any>;
+    if (Array.isArray(p.messages)) {
+      for (let i = p.messages.length - 1; i >= 0; i--) {
+        const msg = p.messages[i];
+        if (msg && msg.role === "user") {
+          if (typeof msg.content === "string") return msg.content;
+          if (Array.isArray(msg.content)) {
+            return msg.content
+              .map((c: any) => (typeof c === "string" ? c : c.text ?? ""))
+              .join(" ");
+          }
+        }
+      }
+    }
+  }
+  return "";
+}
+
+function getResponseForPrompt(prompt: unknown): string {
+  const userText = getLastUserMessage(prompt).toLowerCase();
+
   if (
-    promptStr.includes("hello") ||
-    promptStr.includes("hi") ||
-    promptStr.includes("hey")
+    userText.includes("hola") ||
+    userText.includes("buenas") ||
+    userText.includes("buenos") ||
+    userText.includes("hi") ||
+    userText.includes("hey")
   ) {
     return mockResponses.greeting;
+  }
+
+  if (
+    userText.includes("agend") ||
+    userText.includes("reun") ||
+    userText.includes("llamada") ||
+    userText.includes("cita") ||
+    userText.includes("demo")
+  ) {
+    return mockResponses.meeting;
+  }
+
+  if (
+    userText.includes("correo") ||
+    userText.includes("email") ||
+    userText.includes("@") ||
+    userText.includes("contacto") ||
+    userText.includes("telefono")
+  ) {
+    return mockResponses.lead;
+  }
+
+  if (userText.includes("clima") || userText.includes("weather")) {
+    return mockResponses.weather;
   }
 
   return mockResponses.default;

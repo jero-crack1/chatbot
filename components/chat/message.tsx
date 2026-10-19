@@ -21,6 +21,7 @@ import { MessageActions } from "./message-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { Weather } from "./weather";
+import { BookMeetingCard, SaveLeadCard } from "./lead-cards";
 
 function WaitingText() {
   const { waitingStatus } = useDataStream();
@@ -248,6 +249,60 @@ const PurePreviewMessage = ({
                   addToolApprovalResponse={addToolApprovalResponse}
                   approvalId={approvalId}
                 />
+              )}
+            </ToolContent>
+          </Tool>
+        </div>
+      );
+    }
+
+    if (type === "tool-book_meeting" || type === "tool-bookMeeting") {
+      const { toolCallId, state } = part;
+      const details = (part.output as { details?: any })?.details;
+
+      if (state === "output-available" && details) {
+        return (
+          <div className="w-[min(100%,480px)]" key={toolCallId}>
+            <BookMeetingCard details={details} />
+          </div>
+        );
+      }
+
+      return (
+        <div className="w-[min(100%,450px)]" key={toolCallId}>
+          <Tool className="w-full" defaultOpen={true}>
+            <ToolHeader state={state} type="tool-book_meeting" />
+            <ToolContent>
+              {state === "input-available" && <ToolInput input={part.input} />}
+              {state === "output-available" && (
+                <ToolOutput errorText={undefined} output={part.output} />
+              )}
+            </ToolContent>
+          </Tool>
+        </div>
+      );
+    }
+
+    if (type === "tool-save_lead" || type === "tool-saveLead" || type === "tool-guardar_lead_en_base_de_datos") {
+      const { toolCallId, state } = part;
+      const lead = (part.output as { lead?: any })?.lead;
+
+      if (state === "output-available" && lead) {
+        return (
+          <div className="w-[min(100%,480px)]" key={toolCallId}>
+            <SaveLeadCard lead={lead} />
+          </div>
+        );
+      }
+
+      return (
+        <div className="w-[min(100%,450px)]" key={toolCallId}>
+          <Tool className="w-full" defaultOpen={true}>
+            <ToolHeader state={state} type="tool-save_lead" />
+            <ToolContent>
+              {state === "input-available" && <ToolInput input={part.input} />}
+              {state === "output-available" && (
+                <ToolOutput errorText={undefined} output={part.output} />
               )}
             </ToolContent>
           </Tool>
